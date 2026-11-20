@@ -1,0 +1,60 @@
+# Sobe toda a arquitetura com um comando:  docker compose up -d --build
+# O painel de BI é feito no Power BI Desktop (Windows), conectado ao PostgreSQL em localhost:5432
+#   - postgres   : banco de dados (camadas bronze, silver, gold e meta)
+#   - agendador  : consulta a API do INSS periodicamente e atualiza o data mart sozinho
+#   - pipeline   : execução manual do pipeline (docker compose run --rm pipeline)
+services:
+  postgres:
+    image: postgres:16
+    container_name: sst_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sst}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sst123}
+      POSTGRES_DB: ${POSTGRES_DB:-sst}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sst} -d ${POSTGRES_DB:-sst}"]
+      interval: 5s
+      retries: 10
+
+  agendador:
+    build: .
+    container_name: sst_agendador
+    entrypoint: ["python", "-u", "src/agendador.py"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-sst}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sst123}
+      POSTGRES_DB: ${POSTGRES_DB:-sst}
+      INTERVALO_HORAS: ${INTERVALO_HORAS:-24}
+    volumes:
+      - ./data:/app/data
+      - ./docs:/app/docs
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  pipeline:
+    build: .
+    container_name: sst_pipeline
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-sst}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sst123}
+      POSTGRES_DB: ${POSTGRES_DB:-sst}
+    volumes:
+      - ./data:/app/data      # arquivos baixados (camada landing) ficam no seu computador
+      - ./docs:/app/docs      # relatórios gerados (perfil, mapeamento, qualidade)
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["pipeline"]    # só roda quando chamado: docker compose run --rm pipeline
+
+volumes:
+  pgdata:

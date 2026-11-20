@@ -1,0 +1,4 @@
+.env
+data/landing/*
+!data/landing/.gitkeep
+__pycache__/
